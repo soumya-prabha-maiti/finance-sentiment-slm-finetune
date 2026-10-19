@@ -7,7 +7,7 @@ name = "finance-sentiment-slm-finetune"
 dynamic = ["version"]
 description = ''
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = "MIT"
 keywords = []
 authors = [
@@ -16,20 +16,47 @@ authors = [
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: Implementation :: CPython",
-  "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = []
+dependencies = [
+  "torch==2.12.1",
+  "transformers>=4.46,<5",
+  "huggingface-hub==0.36.2",
+  "pydantic-settings==2.15.0",
+]
+
+[project.optional-dependencies]
+train = [
+  "accelerate>=1.0,<2",
+  "peft>=0.13,<1",
+  "datasets>=3.0,<5",
+]
+app = [
+  "gradio==6.17.3",
+]
+
+[project.scripts]
+finsent-train = "finance_sentiment_slm_finetune.train:main"
+finsent-app = "finance_sentiment_slm_finetune.app:main"
 
 [tool.hatch.version]
 path = "src/finance_sentiment_slm_finetune/__about__.py"
 
+[tool.hatch.envs.default]
+features = ["train", "app"]
+
+[tool.hatch.envs.default.scripts]
+train = "finsent-train {args}"
+app = "finsent-app {args}"
+
+[tool.hatch.envs.hatch-test]
+features = ["train", "app"]
+
 [tool.hatch.envs.types]
+features = ["train", "app"]
 extra-dependencies = [
   "mypy>=1.0.0",
 ]

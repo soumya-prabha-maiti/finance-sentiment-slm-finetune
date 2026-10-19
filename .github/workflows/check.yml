@@ -1,0 +1,59 @@
+name: Check
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check-uv-lock:
+    name: uv.lock is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        # Keep this pin identical to the one in the Dockerfile so CI and the
+        # deployed image resolve dependencies with the same resolver version.
+        run: python -m pip install --no-cache-dir uv==0.10.4
+
+      - name: uv.lock is committed
+        # The Docker build copies uv.lock from the repository, so a lock file
+        # that exists locally but was never committed passes on your machine
+        # and fails at deploy time. The Dockerfile cannot detect this.
+        run: git ls-files --error-unmatch uv.lock
+
+      - name: uv.lock agrees with pyproject.toml
+        # Same gate the Dockerfile runs, reported on the pull request instead of
+        # at image build time. Fails without modifying uv.lock.
+        run: uv lock --check
+
+  check-file-size:
+    name: No large files
+    runs-on: ubuntu-latest
+    # The action creates or reuses an `lfs-detected!` label and, on a hit, adds
+    # that label plus a comment to the pull request. Labels and PR comments are
+    # issue resources, hence issues: write.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Check large files
+        # Canonical location of the action; ActionsDesk/lfs-warning was
+        # transferred to ppremk. v3.3 is the newest tag and declares node20,
+        # itself now deprecated -- there is no node24 release, so this step
+        # still emits a runtime deprecation warning.
+        uses: ppremk/lfs-warning@v3.3
+        with:
+          filesizelimit: 10485760 # this is 10MB

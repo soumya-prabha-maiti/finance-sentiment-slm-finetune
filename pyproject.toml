@@ -35,7 +35,7 @@ train = [
   "datasets>=3.0,<5",
 ]
 app = [
-  "gradio==6.17.3",
+  "gradio[mcp,oauth]==6.17.3",
 ]
 
 [project.scripts]

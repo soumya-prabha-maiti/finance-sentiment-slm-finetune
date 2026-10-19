@@ -1,0 +1,115 @@
+name: Check and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Queue runs on main rather than cancelling them: killing a run mid-deploy
+  # would leave the deployment half-applied.
+  group: check-and-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check-uv-lock:
+    name: uv.lock is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        # Keep this pin identical to the one in the Dockerfile so CI and the
+        # deployed image resolve dependencies with the same resolver version.
+        run: python -m pip install --no-cache-dir uv==0.10.4
+
+      - name: uv.lock is committed
+        # The Docker build copies uv.lock from the repository, so a lock file
+        # that exists locally but was never committed passes on your machine
+        # and fails at deploy time. The Dockerfile cannot detect this.
+        run: git ls-files --error-unmatch uv.lock
+
+      - name: uv.lock agrees with pyproject.toml
+        # Same gate the Dockerfile runs, reported before deploying instead of at
+        # image build time. Fails without modifying uv.lock.
+        run: uv lock --check
+
+  check-file-size:
+    name: No large files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check large files
+        # `git ls-tree --long` reads blob sizes straight from the object
+        # database, so this needs no pull-request context (unlike the
+        # lfs-warning action used on pull requests), no filesystem stat, and no
+        # API token -- it works with checkout's default depth-1 clone.
+        #
+        # It scans the whole tree at HEAD rather than only the pushed commits,
+        # which is what a deploy gate wants: "is anything large in what I am
+        # about to ship", regardless of which commit introduced it. Deleting the
+        # file from HEAD clears the gate; rewriting history is not required.
+        env:
+          FILE_SIZE_LIMIT: 10485760 # this is 10MB
+        run: |
+          git ls-tree -r --long HEAD | awk -F'\t' -v limit="${FILE_SIZE_LIMIT}" '
+            { split($1, meta, / +/); size = meta[4] }
+            size + 0 > limit + 0 {
+              printf "::error file=%s::%s is %d bytes, over the %d byte limit\n", $2, $2, size, limit
+              found = 1
+            }
+            END {
+              if (found) {
+                print "Large file(s) detected. Track them with git-lfs or remove them."
+                exit 1
+              }
+              print "No files over the limit."
+            }
+          '
+
+  deploy-to-hf-spaces:
+    name: Deploy to HF Spaces
+    needs: [check-uv-lock, check-file-size]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          lfs: true
+      
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        run: python -m pip install --no-cache-dir uv==0.10.4
+
+      - name: Export requirements.txt for the Space
+        run: |
+          uv export \
+            --frozen \
+            --no-dev \
+            --extra app \
+            --no-emit-project \
+            --no-hashes \
+            --format requirements-txt \
+            -o requirements.txt
+            
+      - name: Push to hub
+        env:
+          HF: ${{ secrets.HF }}
+        run: |
+          git config --global user.name "Soumya Prabha Maiti"
+          git config --global user.email "73134224+soumya-prabha-maiti@users.noreply.github.com"
+          git checkout --orphan deploy
+          git add -f requirements.txt
+          git commit -m "Deploy to HF Spaces"
+          git push --force https://soumyaprabhamaiti:$HF@huggingface.co/spaces/soumyaprabhamaiti/finance-sentiment-slm-finetune deploy:main

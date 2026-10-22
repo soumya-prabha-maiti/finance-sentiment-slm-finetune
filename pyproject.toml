@@ -36,6 +36,7 @@ train = [
 ]
 app = [
   "gradio[mcp,oauth]==6.17.3",
+  "spaces==0.51.3",
 ]
 
 [project.scripts]
